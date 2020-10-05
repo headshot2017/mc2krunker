@@ -44,7 +44,7 @@ def Print(*args, end="\n"):
     if sys.version.info.major == 2: # python 2.7 (who's going to use this in py2.6???)
         print " ".join(args), end,
     else: # python 3.x
-        print
+        print(*args, end=end)
 
 # platform dependent minecraft save locations
 def mcSavePath():
@@ -80,6 +80,9 @@ def blockNotInside(blockArray, x, y, z):
     bool6 = blockArray[pos6] == 0
     return bool1 or bool2 or bool3 or bool4 or bool5 or bool6
 
+# python 2 input() executes code, py3 doesn't have raw_input()
+if sys.version_info.major == 2:
+    input = raw_input
 
 # actual converter code
 # check for available worlds
@@ -89,10 +92,25 @@ for world in os.listdir(mcSavePath()):
         worlds.append(world)
 
 # pick a world
+world = ""
 while True:
-    
+    for _world in worlds:
+        i = worlds.index(_world)
+        Print("[%d]: %s" % (i, _world))
+    a = input("Select a world by its' number > ")
+    if not a.isdigit():
+        continue
 
-f = open("pack_png/region/r.0.0.mcr", "rb")
+    a = int(a)
+    if a < 0 or a >= len(worlds):
+        Print("invalid world id")
+        continue
+
+    world = worlds[a]
+    break
+
+# open file
+f = open(mcSavePath()+world+"/region/r.0.0.mcr", "rb")
 
 chunk_offsets = []
 chunks = []
@@ -109,7 +127,6 @@ remaining_data = f.read()
 continuebytes = 0
 
 for i in range(len(chunk_offsets)):
-    #print i, chunk_offsets[i]
     if chunk_offsets[i][0] == 0 and chunk_offsets[i][1] == 0: continue
 
     chunkbytes = io.BytesIO(remaining_data[continuebytes+chunk_offsets[i][0] : continuebytes+chunk_offsets[i][0]+chunk_offsets[i][1]])
@@ -118,19 +135,18 @@ for i in range(len(chunk_offsets)):
     compression = struct.unpack_from(">B", chunkbytes.read(1))[0]
 
     if chunk_length == 0 and compression == 0: continue
-    elif compression > 3: print "COMPRESSION > 3???", len(remaining_data), continuebytes, len(remaining_data[continuebytes+chunk_offsets[i][0] : continuebytes+chunk_offsets[i][0]+chunk_offsets[i][1]])
+    elif compression > 3: Print("COMPRESSION > 3???", len(remaining_data), continuebytes, len(remaining_data[continuebytes+chunk_offsets[i][0] : continuebytes+chunk_offsets[i][0]+chunk_offsets[i][1]]))
 
     compressed_chunk = chunkbytes.read(chunk_length-1)
     if len(compressed_chunk) < chunk_length-1: continue
-    #print len(compressed_chunk), chunk_length-1, len(remaining_data), continuebytes, chunkbytes.tell(), len(remaining_data[continuebytes+chunk_offsets[i][0] : continuebytes+chunk_offsets[i][0]+chunk_offsets[i][1]])
     nbtfile = nbt.nbt.NBTFile(buffer=io.BytesIO(zlib.decompress(compressed_chunk)))
-    #print nbtfile["Level"]
     chunks.append(nbtfile)
 
     continuebytes += chunk_offsets[i][1]
 
+# default Krunker JSON file albeit with a few changes
 jsonfile = {
-    "name": "pack_png",
+    "name": world,
     "welMsg": "Converted with MC2Krunker: github.com/headshot2017/mc2krunker",
     "ambient": "#97a0a8",
     "light": "#f2f8fc",
@@ -141,7 +157,9 @@ jsonfile = {
     "spawns": []
 }
 
+# not all chunks yet... gotta fix performance issues first
 for ii in range(len(chunks[:16])):
+
     ch = chunks[ii]
     x, y, z = 0, 0, 0
 
@@ -149,12 +167,14 @@ for ii in range(len(chunks[:16])):
         block = ch["Level"]["Blocks"][i]
         blockname = "???"
 
+        # don't get from bedrock level too, unless you want caves
         if block != 0 and y > 48 and blockNotInside(ch["Level"]["Blocks"], x, y, z):
             for bl in dir():
                 if "MINECRAFT_" in bl and getattr(sys.modules["__main__"], bl) == block:
                     blockname = bl
             jsonfile["objects"].append({"p": [x*8+(ch["Level"]["xPos"].value*8*16), y*8, z*8+(ch["Level"]["zPos"].value*8*16)], "s": [8, 8, 8], "t": krunktextures[block] if block in krunktextures else KRUNKER_DEFAULT})
 
+        # read in yzx order
         y += 1
         if y > 127:
             y = 0
@@ -163,6 +183,7 @@ for ii in range(len(chunks[:16])):
                 z = 0
                 x += 1
 
+# save the file and additionally copy the contents to clipboard, you load the map by pasting the json on krunker editor
 json.dump(jsonfile, open("jsonfile.txt", "wb"))
 pyperclip.copy(open("jsonfile.txt", "rb").read())
 print "done"
