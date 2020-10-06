@@ -1,3 +1,4 @@
+from __future__ import print_function
 import struct, zlib, nbt, io, sys, os, json, pyperclip
 
 ############################### CONSTANTS/ENUMS ###############################
@@ -38,13 +39,6 @@ krunktextures = {
 }
 
 ############################### CONSTANTS/ENUMS END ###########################
-
-# python version dependent print function
-def Print(*args, end="\n"):
-    if sys.version.info.major == 2: # python 2.7 (who's going to use this in py2.6???)
-        print " ".join(args), end,
-    else: # python 3.x
-        print(*args, end=end)
 
 # platform dependent minecraft save locations
 def mcSavePath():
@@ -96,14 +90,14 @@ world = ""
 while True:
     for _world in worlds:
         i = worlds.index(_world)
-        Print("[%d]: %s" % (i, _world))
+        print("[%d]: %s" % (i, _world))
     a = input("Select a world by its' number > ")
     if not a.isdigit():
         continue
 
     a = int(a)
     if a < 0 or a >= len(worlds):
-        Print("invalid world id")
+        print("invalid world id")
         continue
 
     world = worlds[a]
@@ -135,7 +129,7 @@ for i in range(len(chunk_offsets)):
     compression = struct.unpack_from(">B", chunkbytes.read(1))[0]
 
     if chunk_length == 0 and compression == 0: continue
-    elif compression > 3: Print("COMPRESSION > 3???", len(remaining_data), continuebytes, len(remaining_data[continuebytes+chunk_offsets[i][0] : continuebytes+chunk_offsets[i][0]+chunk_offsets[i][1]]))
+    elif compression > 3: print("COMPRESSION > 3???", len(remaining_data), continuebytes, len(remaining_data[continuebytes+chunk_offsets[i][0] : continuebytes+chunk_offsets[i][0]+chunk_offsets[i][1]]))
 
     compressed_chunk = chunkbytes.read(chunk_length-1)
     if len(compressed_chunk) < chunk_length-1: continue
@@ -186,4 +180,4 @@ for ii in range(len(chunks[:16])):
 # save the file and additionally copy the contents to clipboard, you load the map by pasting the json on krunker editor
 json.dump(jsonfile, open("jsonfile.txt", "wb"))
 pyperclip.copy(open("jsonfile.txt", "rb").read())
-print "done"
+print("done")
