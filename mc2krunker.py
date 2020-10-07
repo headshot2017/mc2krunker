@@ -1,5 +1,5 @@
 from __future__ import print_function
-import struct, zlib, nbt, io, sys, os, json, pyperclip
+import struct, zlib, gzip, nbt, io, sys, os, json, pyperclip
 
 ############################### CONSTANTS/ENUMS ###############################
 
@@ -29,16 +29,44 @@ MINECRAFT_SANDSTONE = 24
 
 # minecraft to krunker dict
 krunktextures = {
-    MINECRAFT_DIRT: KRUNKER_DIRT,
-    MINECRAFT_STONE: KRUNKER_WALL,
-    MINECRAFT_OAKPLANK: KRUNKER_WOOD,
-    MINECRAFT_GRASS: KRUNKER_GRASS,
-    MINECRAFT_BEDROCK: KRUNKER_GRID,
-    MINECRAFT_WATER: KRUNKER_LIQUID,
-    MINECRAFT_SAND: KRUNKER_ROOF
+    MINECRAFT_DIRT: [KRUNKER_DIRT, "#FFFFFF"],
+    MINECRAFT_STONE: [KRUNKER_WALL, "#FFFFFF"],
+    MINECRAFT_OAKWOOD: [KRUNKER_WOOD, "#6C5736"],
+    MINECRAFT_OAKLEAVES: [KRUNKER_GRASS, "#57E03E"],
+    MINECRAFT_OAKPLANK: [KRUNKER_WOOD, "#FFFFFF"],
+    MINECRAFT_GRASS: [KRUNKER_GRASS, "#FFFFFF"],
+    MINECRAFT_BEDROCK: [KRUNKER_GRID, "#FFFFFF"],
+    MINECRAFT_WATER: [KRUNKER_LIQUID, "#FFFFFF"],
+    MINECRAFT_SAND: [KRUNKER_ROOF, "#FFFFFF"],
 }
 
 ############################### CONSTANTS/ENUMS END ###########################
+
+chunk_offsets = []
+chunks = {}
+timestamps = []
+krunkblocks = {}
+krunkblocksScaled = {} # multiple krunker block objects together will be turned into a single one to help with performance and krunker's object limit
+
+# krunkblocks dict:
+# {
+#    y_pos: KRUNKER_texture_id,
+#    ...
+# }
+#
+# krunkblocksScaled dict:
+# {
+#    y_pos: [
+#        KRUNKER_texture_id,
+#        x_size,
+#        y_size,
+#        z_size,
+#        x_offset,
+#        z_offset
+#    ],
+#    ...
+# }
+
 
 # platform dependent minecraft save locations
 def mcSavePath():
@@ -74,6 +102,20 @@ def blockNotInside(blockArray, x, y, z):
     bool6 = blockArray[pos6] == 0
     return bool1 or bool2 or bool3 or bool4 or bool5 or bool6
 
+# if this block pos in krunkblocks[] dict isn't already inside a scaled object in krunkblocksScaled[]
+def blockNotInRange(yy, xx, zz, tex):
+    if not krunkblocksScaled[y]: return True
+
+    for x0,z0 in krunkblocksScaled[y].keys():
+        block = krunkblocksScaled[y][(x0,z0)]
+        if block[0] != tex: continue # must be same texture
+
+        x1,z1 = block[1] + x0, block[3] + z0
+        if xx >= x0 and xx < x1 and zz >= z0 and zz < z1: return False
+
+    return True
+        
+
 # python 2 input() executes code, py3 doesn't have raw_input()
 if sys.version_info.major == 2:
     input = raw_input
@@ -103,13 +145,32 @@ while True:
     world = worlds[a]
     break
 
-# open file
-f = open(mcSavePath()+world+"/region/r.0.0.mcr", "rb")
+# default Krunker JSON file albeit with a few changes
+jsonfile = {
+    "name": world,
+    "welMsg": "Converted with MC2Krunker: github.com/headshot2017/mc2krunker",
+    "ambient": "#97a0a8",
+    "light": "#f2f8fc",
+    "sky": "#dce8ed",
+    "fog": "#8d9aa0",
+    "fogD": 2000,
+    "objects": [],
+    "spawns": []
+}
 
-chunk_offsets = []
-chunks = []
-timestamps = []
-krunkblocks = []
+# open file
+print("Opening world \"%s\"" % world)
+
+# first get the player logout pos on level.dat
+gz = gzip.GzipFile(mcSavePath()+world+"/level.dat")
+leveldat = nbt.nbt.NBTFile(buffer=gz)
+gz.close()
+player_x, player_y, player_z = [p.value for p in leveldat["Data"]["Player"]["Pos"]]
+playerchunk_x, playerchunk_z = int(player_x / 16), int(player_z / 16)
+region_x, region_z = playerchunk_x/32, playerchunk_z/32
+
+# use the extracted region coordinates
+f = open(mcSavePath()+world+"/region/r.%d.%d.mcr" % (region_x, region_z), "rb")
 
 for i in range(0, 1024):
     chunk_offsets.append(chunk_location(struct.unpack_from(">I", f.read(4))[0]))
@@ -134,27 +195,21 @@ for i in range(len(chunk_offsets)):
     compressed_chunk = chunkbytes.read(chunk_length-1)
     if len(compressed_chunk) < chunk_length-1: continue
     nbtfile = nbt.nbt.NBTFile(buffer=io.BytesIO(zlib.decompress(compressed_chunk)))
-    chunks.append(nbtfile)
+    chunks[(nbtfile["Level"]["xPos"].value, nbtfile["Level"]["zPos"].value)] = nbtfile
 
     continuebytes += chunk_offsets[i][1]
 
-# default Krunker JSON file albeit with a few changes
-jsonfile = {
-    "name": world,
-    "welMsg": "Converted with MC2Krunker: github.com/headshot2017/mc2krunker",
-    "ambient": "#97a0a8",
-    "light": "#f2f8fc",
-    "sky": "#dce8ed",
-    "fog": "#8d9aa0",
-    "fogD": 2000,
-    "objects": [],
-    "spawns": []
-}
-
 # not all chunks yet... gotta fix performance issues first
-for ii in range(len(chunks[:16])):
 
-    ch = chunks[ii]
+x_max, z_max = 0, 0
+
+def readChunk(chunk_x, chunk_z):
+    global x_max, z_max
+
+    if (chunk_x, chunk_z) not in chunks: return
+    ch = chunks[(chunk_x, chunk_z)]
+    chunk_x = ch["Level"]["xPos"].value
+    chunk_z = ch["Level"]["zPos"].value
     x, y, z = 0, 0, 0
 
     for i in range(len(ch["Level"]["Blocks"])):
@@ -162,11 +217,19 @@ for ii in range(len(chunks[:16])):
         blockname = "???"
 
         # don't get from bedrock level too, unless you want caves
-        if block != 0 and y > 48 and blockNotInside(ch["Level"]["Blocks"], x, y, z):
+        if block != 0 and y > 60 and blockNotInside(ch["Level"]["Blocks"], x, y, z):
             for bl in dir():
                 if "MINECRAFT_" in bl and getattr(sys.modules["__main__"], bl) == block:
                     blockname = bl
-            jsonfile["objects"].append({"p": [x*8+(ch["Level"]["xPos"].value*8*16), y*8, z*8+(ch["Level"]["zPos"].value*8*16)], "s": [8, 8, 8], "t": krunktextures[block] if block in krunktextures else KRUNKER_DEFAULT})
+
+            if y not in krunkblocks:
+                krunkblocks[y] = {}
+                krunkblocksScaled[y] = {}
+
+            if x_max < x*8+(chunk_x*8*16): x_max = x*8+(chunk_x*8*16)
+            if z_max < z*8+(chunk_z*8*16): z_max = z*8+(chunk_z*8*16)
+            krunkblocks[y][(x*8+(chunk_x*8*16), z*8+(chunk_z*8*16))] = krunktextures[block] if block in krunktextures else [KRUNKER_DEFAULT, "#ffffff"]
+            # sort by Y so i can then put similar blocks together into one easily by X and Z
 
         # read in yzx order
         y += 1
@@ -177,7 +240,89 @@ for ii in range(len(chunks[:16])):
                 z = 0
                 x += 1
 
+print("Reading chunks")
+chunk_distance = 8
+for ii in range(chunk_distance):
+
+    for x_loop in range(playerchunk_x-ii, playerchunk_x+ii+1):
+        for z_loop in range(playerchunk_z-ii, playerchunk_z+ii+1):
+            print("%d: %d (%d,%d) - %d (%d,%d)" % (ii, x_loop, playerchunk_x-ii, playerchunk_x+ii, z_loop, playerchunk_z-ii, playerchunk_z+ii), end="")
+            if ii == 0 or not (x_loop != playerchunk_x-ii and x_loop != playerchunk_x+ii and z_loop != playerchunk_z-ii and z_loop != playerchunk_z+ii):
+                print(" reading")
+                readChunk(x_loop, z_loop)
+            else:
+                print("")
+
+# put similar blocks into one
+print("Grouping similar blocks")
+for y in krunkblocks.keys():
+    for tex, color in krunktextures.values():
+        for x in range(0, x_max, 8):
+            for z in range(0, z_max, 8):
+                if (x,z) in krunkblocks[y] and krunkblocks[y][(x,z)][0] == tex and blockNotInRange(y, x, z, tex): # we can scale this block
+                    x_size, z_size = 8, 8
+                    x_offset, z_offset = 0, 0
+
+                    while (x+x_size, z) in krunkblocks[y] and krunkblocks[y][(x+x_size, z)][0] == tex:
+                        x_size += 8
+
+                    while (x, z+z_size) in krunkblocks[y]:
+                        stop = False
+
+                        for x_loop in range(x, x+x_size+8, 8):
+                            if (x_loop, z+z_size) not in krunkblocks[y] or krunkblocks[y][(x_loop, z+z_size)][0] != tex:
+                                stop = True
+                                break
+                            z_size += 8
+                        
+                        if stop:
+                            break
+
+                    # calculate offset: krunker editor scales blocks by its' center instead of top left corner so we want to adjust this
+                    for i in range(8, x_size, 2):
+                        x_offset += 1
+                    for i in range(8, z_size, 2):
+                        z_offset += 1
+
+                    # finally, place the block and delete this in the original key
+                    krunkblocksScaled[y][(x, z)] = [tex, x_size, 8, z_size, x_offset, z_offset, color]
+                    
+                    for del_x in range(x, x+x_size):
+                        for del_z in range(z, z+z_size):
+                            if (del_x, del_z) in krunkblocks[y]:
+                                del krunkblocks[y][(del_x, del_z)]
+
+#print(krunkblocksScaled)
+
+# finally, put the blocks in the krunker JSON
+for y in krunkblocksScaled.keys():
+    for x,z in krunkblocksScaled[y].keys():
+        tex, x_size, y_size, z_size, x_offset, z_offset, color = krunkblocksScaled[y][(x,z)]
+
+        jsonfile["objects"].append(
+            {"p": [(x + x_offset), y*8, (z + z_offset)], # position
+             "s": [x_size, y_size, z_size], # size
+             "t": tex,
+             "ci": 0, # color index
+             "colors": [color] # color hex code
+            }
+        )
+
+for y in krunkblocks.keys():
+    for x,z in krunkblocks[y].keys():
+        tex, color = krunkblocks[y][(x,z)]
+
+        jsonfile["objects"].append(
+            {"p": [x, y*8, z],
+             "s": [8, 8, 8],
+             "t": tex,
+             "ci": 0, # color index
+             "colors": [color] # color hex code
+            }
+        )
+
 # save the file and additionally copy the contents to clipboard, you load the map by pasting the json on krunker editor
-json.dump(jsonfile, open("jsonfile.txt", "wb"))
-pyperclip.copy(open("jsonfile.txt", "rb").read())
-print("done")
+jsonstr = json.dumps(jsonfile)
+open("jsonfile.txt", "wb").write(jsonstr)
+pyperclip.copy(jsonstr)
+print("done. level JSON data copied to clipboard")
