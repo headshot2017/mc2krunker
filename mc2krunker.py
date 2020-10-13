@@ -329,33 +329,32 @@ def readChunk(chunk_x, chunk_z):
     else: # if isAnvil
         for i in range(len(ch["Level"]["Sections"])):
             section = ch["Level"]["Sections"][i]
-            x, y, z = 0, 0, 0
 
-            for block in section["Blocks"]:
-                blockname = "???"
+            for y in range(16):
+                for z in range(16):
+                    for x in range(16):
+                        i = y * 16*16 + z * 16 + x
+                        block = section["Blocks"][i]
+                        blockname = "???"
 
-                if block != 0 and y + (section["Y"].value*16) >= 48:
-                    for bl in dir():
-                        if "MINECRAFT_" in bl and getattr(sys.modules["__main__"], bl) == block:
-                            blockname = bl
+                        if block != 0 and y + (section["Y"].value*16) >= 48:
+                            for bl in dir():
+                                if "MINECRAFT_" in bl and getattr(sys.modules["__main__"], bl) == block:
+                                    blockname = bl
 
-                    if y not in krunkblocks:
-                        krunkblocks[y] = {}
-                        krunkblocksScaled[y] = {}
+                            if y not in krunkblocks:
+                                krunkblocks[y] = {}
+                                krunkblocksScaled[y] = {}
 
-                    if x_max < x*8+(chunk_x*8*16): x_max = x*8+(chunk_x*8*16)
-                    if z_max < z*8+(chunk_z*8*16): z_max = z*8+(chunk_z*8*16)
-                    krunkblocks[y + (section["Y"].value*16)][(x*8+(chunk_x*8*16), z*8+(chunk_z*8*16))] = krunktextures[block]+[block] if block in krunktextures else [KRUNKER_DEFAULT, None, block]
-                    # sort by Y so i can then put similar blocks together into one easily by X and Z
+                            if not x_max or x_max < x*8+(chunk_x*8*16): x_max = x*8+(chunk_x*8*16)
+                            if not y_max or y_max < section["Y"].value*16 + y: y_max = section["Y"].value*16 + y
+                            if not z_max or z_max < z*8+(chunk_z*8*16): z_max = z*8+(chunk_z*8*16)
+                            if not x_min or x*8+(chunk_x*8*16) < x_min: x_min = x*8+(chunk_x*8*16)
+                            if not y_min or section["Y"].value*16 + y < y_min: y_min = section["Y"].value*16 + y
+                            if not z_min or z*8+(chunk_z*8*16) < z_min: z_min = z*8+(chunk_z*8*16)
+                            krunkblocks[section["Y"].value*16 + y][(x*8+(chunk_x*8*16), z*8+(chunk_z*8*16))] = krunktextures[block]+[block] if block in krunktextures else [KRUNKER_DEFAULT, None, block]
+                            # sort by Y so i can then put similar blocks together into one easily by X and Z
 
-                y += 1
-                if y > 15:
-                    y = 0
-                    z += 1
-                    if z > 15:
-                        z = 0
-                        x += 1
-                
 
 print("Reading chunks")
 for ii in range(chunk_distance):
