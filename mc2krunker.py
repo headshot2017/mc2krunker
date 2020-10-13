@@ -44,7 +44,7 @@ krunktextures = {
 ############################### CONSTANTS/ENUMS END ###########################
 
 regions = {}
-surfaceAreas = []
+surfaceAreas = {}
 krunkblocks = {y: {} for y in range(128)}
 krunkblocksScaled = {y: {} for y in range(128)} # multiple krunker block objects together will be turned into a single one to help with performance and krunker's object limit
 
@@ -377,13 +377,13 @@ for y in range(y_min, y_max):
         for z in range(z_min, z_max+8, 8):
             #if x == -1032: print(x, y, z, (x,z) in krunkblocks[y], "surface area")
             if (x,z) not in krunkblocks[y] and isSurfaceArea(x, y, z):
-                surfaceAreas.append((x,y,z))
+                surfaceAreas[(x,y,z)] = True
 
 # another loop again... but this time we remove blocks that don't have at least one surface area next to them
 # these are the inaccessible blocks you will never see in the Krunker map
 print("Removing invisible/unnecessary blocks")
 for y in krunkblocks.keys():
-    print("Progress %d%% (%d/%d) krunkblocks[y] length %d" % (float(y) / len(krunkblocks) * 100, y, len(krunkblocks), len(krunkblocks[y])))
+    #print("Progress %d%% (%d/%d) krunkblocks[y] length %d" % (float(y) / len(krunkblocks) * 100, y, len(krunkblocks), len(krunkblocks[y])))
     for x,z in krunkblocks[y].keys():
         if not hasSurfaceArea(x, y, z):
             del krunkblocks[y][(x,z)] 
